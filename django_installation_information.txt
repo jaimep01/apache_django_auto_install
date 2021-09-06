@@ -1,0 +1,15 @@
+
+USERNAME: jaime
+project name: vacations
+static ip: 
+ip gateway: 
+global dns: 
+network adapter name: 
+
+psql created database: django_main
+psql super user created: jaime
+psql user for django settings: django
+psql password for user django: root
+
+your project is here: /project/vacations
+I will recommend to check the ownership of the files since its a hit or miss right now (tip: chmod and chown are your friends when you cannot access the files)

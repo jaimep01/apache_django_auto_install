@@ -1,122 +1,138 @@
 #! /bin/bash
 
-echo "Hello I will help you setup an non https django project the install location will be under /projects\n"
-echo "This will help you set up an apache server to serve the django app wiht a postgresql database \n"
+printf "I will help you set up an apache server, a django app, and a postgresql database.\n"
 
-echo "\nWho are you?"
-echo users
-read username
+read -p "Input DB USERNAME: " USERNAME
 
-echo "\nInput name of project"
-read project_name
+read -p "Input name of project: " PROJECT_NAME
 
-echo "\nInput your staticIP in format 192.168.1.10/24"
-read project_ip
+read -p "Input project working directory: " PROJECT_DIR
 
-echo "\nInput your gateway address ex: 192.168.1.1, usually it is the first ip of your ip address"
-read project_gateway
+read -p "Want to setup networking? [Y/n]" SETUP_NET
 
-echo "\nInput your DNS servers, I recommend to add 2,  if this is a enterprise app, you should add you dns server IP to recognize internal dns records, if not use google 8.8.8.8 or 1.1.1.1"
-read proejct_dns
+if [ $SETUP_NET = "Y" ] || [ $SETUP_NET = "y" ] ;
+then
+  read -p "Input your staticIP in format 192.168.1.10/24: " PROJECT_IP
 
-echo "\nPlease select your network adapter"
-sudo ip link && echo "\n"
-read ethernet_card
+  read -p "Input your gateway address ex: 192.168.1.1: " PROJECT_GATEWAY
 
-echo "# This is the network config written by 'subiquity'
-network:
-  ethernets:
-    $ethernet_card:
-      dhcp4: no
-      addresses: [$project_ip]
-      gateway4: $project_gateway
-      nameservers:
-        addresses: [$proejct_dns]
-  version: 2" | sudo tee /etc/netplan/00-installer-config.yaml 
+  read -p "Iput your DNS servers, I recommend to add 2,  if this is an enterprise app, you should add your internal dns server IP to recognize internal dns records, if not use google 8.8.8.8 or 1.1.1.1: " PROJECT_DNS
+  
+  printf "Please select your network adapter from the list:"
+  ip -br link | awk  '{print "NIC: "$1,"    Stauts: "$2}' && printf "\n"
+  read -p "NIC: " NIC
 
-sudo netplan apply
+  if [ -f /etc/netplan/00-installer-config.yaml.bak ]
+  then
+      printf "\nOriginal backup exists on your filesystem not overwriting for safety measures.\n"
+  elif [ -f /etc/netplan/00-installer-config.yaml ] 
+  then
+      printf "Created backup 00-installer-config.yaml.bak"
+      cp /etc/netplan/00-installer-config.yaml /etc/netplan/00-installer-config.yaml.bak
+  else
+      netplan generate
+  fi
+
+  printf "# This is the network config written by 'subiquity'
+  network:
+    ethernets:
+      $NIC:
+        dhcp4: no
+        addresses: [$PROJECT_IP]
+        gateway4: $PROJECT_GATEWAY
+        nameservers:
+          addresses: [$PROJECT_DNS]
+    version: 2" | tee /etc/netplan/00-installer-config.yaml 
+
+  netplan apply 
+fi
 
 # Updating OS
-# sudo apt update && echo "\n"
+sudo apt update && printf "\n"
 
 # Installing Apache Web Server, Postgresql, python3 pip (if not installed), and Mod-WSGI
-sudo apt install python3 python3-pip apache2 postgresql postgresql-contrib libpq-dev python3-dev libapache2-mod-wsgi-py3 -y -qq && echo "\n"
+apt install python3 python3-pip apache2 postgresql postgresql-contrib libpq-dev python3-dev libapache2-mod-wsgi-py3 -y -qq && printf "\n"
 
 #Creaet default user and database
-sudo -u postgres createuser -s $username
-createdb django_main
-psql -d django_main -c "CREATE USER django WITH PASSWORD 'root'"
-psql -d django_main -c "grant ALL on DATABASE django_main to django;"
+sudo -u postgres createuser -s $USERNAME
+sudo -u postgres createdb django_main
+sudo -u postgres psql -d django_main -c "CREATE USER django WITH PASSWORD 'root'"
+sudo -u postgres psql -d django_main -c "grant ALL on DATABASE django_main to django;"
 
 #sudo create developers group to control acces to folders and add current user
-sudo addgroup developers && echo "\n"
-sudo adduser $username developers && echo "\n"
+addgroup developers && printf "\n"
+adduser $USERNAME developers && printf "\n"
 
-# Creating projects folder and give permisions
+Creating projects folder and give permisions
 
-if [ -d /projects ]
+echo "$PROJECT_DIR/$PROJECT_NAME"
+
+if [ -d $PROJECT_DIR/$PROJECT_NAME ]
 then
-    echo "folder /projects already created. \n"
+    printf "folder $PROJECT_DIR already created.\n"
 else
-    sudo mkdir /projects
-    sudo mkdir /projects/$project_name
-    sudo chown root:developers -R /projects 
-    sudo chmod -R 775 /projects 
+    mkdir -p $PROJECT_DIR/$PROJECT_NAME
+    chown root:developers -R $PROJECT_DIR 
+    chmod -R 770 $PROJECT_DIR 
 fi
 
 # Install virtualenv to keep python installation clean
 pip -q install virtualenv
 # Install virtualenv for python in projects, and install django
-python3 -m virtualenv /projects/venv_django
-/projects/venv_django/bin/pip install asgiref Django django-cors-headers django-filter djangorestframework flake8 Markdown mccabe psycopg2 pycodestyle pyflakes pytz sqlparse 
-/projects/venv_django/bin/python -m django startproject $project_name /projects/$project_name
+python3 -m virtualenv $PROJECT_DIR/venv_django
+$PROJECT_DIR/venv_django/bin/python -m pip install --upgrade pip
+$PROJECT_DIR/venv_django/bin/pip install asgiref Django django-cors-headers django-filter djangorestframework flake8 Markdown mccabe psycopg2 pycodestyle pyflakes pytz sqlparse 
+$PROJECT_DIR/venv_django/bin/python -m django startproject $PROJECT_NAME $PROJECT_DIR/$PROJECT_NAME
 
 # Create old apache config backup, skips if exists
 
 if [ -f /etc/apache2/sites-available/000-default.conf.bak ]
 then
-    echo "\nOriginal backup exists on your filesystem not overwriting for safety measures.\n"
+    printf "\nOriginal backup exists on your filesystem not overwriting for safety measures.\n"
 else
-    sudo cp /etc/apache2/sites-available/000-default.conf /etc/apache2/sites-available/000-default.conf.bak
+    cp /etc/apache2/sites-available/000-default.conf /etc/apache2/sites-available/000-default.conf.bak
 fi
 
 #Use the backup and concatenate the django requiered confs
-( head -n -3 /etc/apache2/sites-available/000-default.conf.bak; echo "
-        alias /static /projects/$project_name/site/public/static
+( head -n -3 /etc/apache2/sites-available/000-default.conf.bak; printf "
+        alias /static $PROJECT_DIR/$PROJECT_NAME/site/public/static
 
-        <Directory /projects/$project_name/site/public/static>
+        <Directory $PROJECT_DIR/$PROJECT_NAME/site/public/static>
                 Require all granted
         </Directory>
 
-        <Directory /projects/$project_name/$project_name>
+        <Directory $PROJECT_DIR/$PROJECT_NAME/$PROJECT_NAME>
                 <Files wsgi.py>
                         Require all granted
                 </Files>
         </Directory>
 
-        WSGIDaemonProcess $project_name python-path=/projects/$project_name python-home=/projects/venv_django
-        WSGIProcessGroup $project_name
-        WSGIScriptAlias / /projects/$project_name/$project_name/wsgi.py
+        WSGIDaemonProcess $PROJECT_NAME python-path=$PROJECT_DIR/$PROJECT_NAME python-home=$PROJECT_DIR/venv_django
+        WSGIProcessGroup $PROJECT_NAME
+        WSGIScriptAlias / $PROJECT_DIR/$PROJECT_NAME/$PROJECT_NAME/wsgi.py
 
 </VirtualHost>
 
-"  ) | sudo tee /etc/apache2/sites-available/000-default.conf
+"  ) | tee /etc/apache2/sites-available/000-default.conf
 
-sudo service apache2 restart
+chown root:developers -R $PROJECT_DIR
+chmod -R 770 $PROJECT_DIR 
 
-echo "
-username: $username
-project name: $project_name
-static ip: $project_ip
-ip gateway: $project_gateway
-global dns: $proejct_dns
-network adapter name: $ethernet_card
+service apache2 restart
+
+printf "
+USERNAME: $USERNAME
+project name: $PROJECT_NAME
+static ip: $PROJECT_IP
+ip gateway: $PROJECT_GATEWAY
+global dns: $PROJECT_DNS
+network adapter name: $NIC
 
 psql created database: django_main
-psql super user created: $username
+psql super user created: $USERNAME
 psql user for django settings: django
 psql password for user django: root
 
-your project is here: /projects/$project_name
+your project is here: $PROJECT_DIR/$PROJECT_NAME
 I will recommend to check the ownership of the files since its a hit or miss right now (tip: chmod and chown are your friends when you cannot access the files)
 " > ./django_installation_information.txt
